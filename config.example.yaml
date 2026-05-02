@@ -1,0 +1,17 @@
+fs42_base_url: "http://127.0.0.1:4242"
+public_base_url: "http://127.0.0.1:8088"
+hls_root: "./hls"
+media_root: "."              # set to your FieldStation42 repo/root path if running elsewhere
+ffmpeg_bin: "ffmpeg"
+stream_all_channels: true
+channels: []                  # optional allow-list, e.g. ["Nickelodeon", "Sky One"]
+segment_seconds: 4
+playlist_size: 8
+poll_seconds: 2
+lookahead_hours: 8
+transcode:
+  video_codec: "libx264"
+  preset: "veryfast"
+  crf: 23
+  audio_codec: "aac"
+  audio_bitrate: "128k"
