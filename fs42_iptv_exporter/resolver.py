@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 
 PATH_KEYS = (
@@ -92,7 +92,7 @@ def find_first_path(value: Any) -> str | None:
         lowered = value.lower()
         if lowered.startswith(("http://", "https://", "rtsp://", "rtmp://")):
             return value
-        if any(lowered.endswith(ext) for ext in (".mp4", ".mkv", ".avi", ".mov", ".webm", ".mp3", ".m4v", ".ts")):
+        if any(lowered.endswith(ext) for ext in (".mp4", ".mkv", ".avi", ".mov", ".webm", ".mp3", ".m4v", ".ts", ".png", ".jpg", ".jpeg")):
             return value
         if "/" in value or "\\" in value:
             return value
@@ -120,6 +120,10 @@ def find_title(item: dict[str, Any], fallback: str = "") -> str:
         value = item.get(key)
         if value:
             return str(value)
+    content_type = item.get("content_type")
+    media_type = item.get("media_type")
+    if content_type or media_type:
+        return " / ".join(str(x) for x in (content_type, media_type) if x)
     return fallback
 
 
@@ -129,14 +133,6 @@ def find_duration(item: dict[str, Any]) -> float | None:
         if seconds is not None:
             return seconds
     return None
-
-
-def block_duration(block: dict[str, Any]) -> float | None:
-    start = parse_dt(block.get("start_time") or block.get("start"))
-    end = parse_dt(block.get("end_time") or block.get("end"))
-    if start and end:
-        return (end - start).total_seconds()
-    return find_duration(block)
 
 
 def resolve_media_path(path: str, media_root: Path) -> str:
@@ -162,23 +158,62 @@ def resolve_now(schedule: dict[str, Any], station: str, now: datetime, media_roo
         if not items:
             continue
 
-        # If FS42 returns a plan with per-item durations, walk it. Otherwise fall back to first media in block.
         for item in items:
             duration = find_duration(item)
             path = find_first_path(item)
+
             if duration is None:
                 if path:
-                    return NowPlaying(station, block_title, find_title(item, block_title), resolve_media_path(path, media_root), elapsed, None, start, end, item)
+                    skip = as_seconds(item.get("skip")) or 0.0
+                    return NowPlaying(
+                        station=station,
+                        block_title=block_title,
+                        item_title=find_title(item, block_title),
+                        path=resolve_media_path(path, media_root),
+                        offset_seconds=max(0.0, skip + elapsed),
+                        item_duration_seconds=None,
+                        block_start=start,
+                        block_end=end,
+                        raw_item=item,
+                    )
                 continue
+
             if elapsed < duration:
                 if not path:
                     return None
-                return NowPlaying(station, block_title, find_title(item, block_title), resolve_media_path(path, media_root), max(0.0, elapsed), duration, start, end, item)
+
+                skip = as_seconds(item.get("skip")) or 0.0
+                item_elapsed = max(0.0, elapsed)
+                source_offset = skip + item_elapsed
+                remaining_duration = max(0.1, duration - item_elapsed)
+
+                return NowPlaying(
+                    station=station,
+                    block_title=block_title,
+                    item_title=find_title(item, block_title),
+                    path=resolve_media_path(path, media_root),
+                    offset_seconds=source_offset,
+                    item_duration_seconds=remaining_duration,
+                    block_start=start,
+                    block_end=end,
+                    raw_item=item,
+                )
+
             elapsed -= duration
 
-        # Schedule plans sometimes omit break filler details; fall back to last playable item.
         for item in reversed(items):
             path = find_first_path(item)
             if path:
-                return NowPlaying(station, block_title, find_title(item, block_title), resolve_media_path(path, media_root), 0.0, find_duration(item), start, end, item)
+                skip = as_seconds(item.get("skip")) or 0.0
+                return NowPlaying(
+                    station=station,
+                    block_title=block_title,
+                    item_title=find_title(item, block_title),
+                    path=resolve_media_path(path, media_root),
+                    offset_seconds=skip,
+                    item_duration_seconds=find_duration(item),
+                    block_start=start,
+                    block_end=end,
+                    raw_item=item,
+                )
     return None
